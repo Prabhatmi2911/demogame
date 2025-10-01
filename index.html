@@ -1,31 +1,243 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <title>Temple Run Clone — Three.js Self-Contained</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+    <title>Temple Run Clone — Three.js Self-Contained</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(#87ceeb, #0b3d91);
+        }
+
+        /* UI overlays */
+        #ui {
+            position: absolute;
+            left: 12px;
+            top: 12px;
+            color: #fff;
+            z-index: 20;
+            user-select: none;
+            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        }
+
+        #score,
+        #speed {
+            background: rgba(0, 0, 0, 0.25);
+            padding: 6px 10px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+        }
+
+        #debug.small {
+            margin-top: 6px;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 6px 8px;
+            border-radius: 6px;
+        }
+
+        /* touch controls (mobile) */
+        #touchControls {
+            position: absolute;
+            right: 12px;
+            bottom: 18px;
+            z-index: 25;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        .touchBtn {
+            pointer-events: auto;
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            border: none;
+            background: rgba(255, 255, 255, 0.12);
+            color: white;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+        }
+
+        .touchBtn.central {
+            width: 72px;
+            height: 72px;
+            font-size: 26px;
+        }
+
+        /* Game over overlay */
+        #overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            gap: 18px;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            background: linear-gradient(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.6));
+            color: white;
+            z-index: 30;
+            text-align: center;
+        }
+
+        #overlay.hidden {
+            display: none;
+        }
+
+        #overlay h1 {
+            font-size: 48px;
+            margin: 0;
+            text-shadow: 0 3px 10px rgba(0, 0, 0, 0.7);
+        }
+
+        #overlay button {
+            padding: 10px 20px;
+            border-radius: 10px;
+            border: none;
+            background: #ffd166;
+            color: #111;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        /* Ensure canvas covers full window */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
 </head>
+
 <body>
-  <div id="ui">
-    <div id="score">Score: 0</div>
-    <div id="speed">Speed: 0</div>
-    <div id="debug" class="small">FPS: 0 | Obstacles: 0 | Coins: 0</div>
-  </div>
+    <div id="ui">
+        <div id="score">Score: 0</div>
+        <div id="speed">Speed: 0</div>
+        <div id="debug" class="small">FPS: 0 | Obstacles: 0 | Coins: 0</div>
+    </div>
 
-  <!-- touch controls -->
-  <div id="touchControls">
-    <button id="btnLeft" class="touchBtn">◀</button>
-    <button id="btnJump" class="touchBtn central">▲</button>
-    <button id="btnRight" class="touchBtn">▶</button>
-  </div>
+    <!-- touch controls -->
+    <div id="touchControls">
+        <button id="btnLeft" class="touchBtn">◀</button>
+        <button id="btnJump" class="touchBtn central">▲</button>
+        <button id="btnRight" class="touchBtn">▶</button>
+    </div>
 
-  <div id="overlay" class="hidden">
-    <h1>Game Over</h1>
-    <p id="finalScore">Score: 0</p>
-    <button id="restartBtn">Restart</button>
-  </div>
+    <div id="overlay" class="hidden">
+        <h1>Game Over</h1>
+        <p id="finalScore">Score: 0</p>
+        <button id="restartBtn">Restart</button>
+    </div>
 
-  <script type="module" src="main.js"></script>
+    <script>
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        // ---------------- CONFIG ----------------
+        const CONFIG = {
+            tileCount: 12, tileLength: 12, laneX: [-3, 0, 3], laneCount: 3,
+            playerZ: 6, moveSpeedStart: 12, speedIncreasePerSecond: 0.5,
+            maxSpeed: 40, jumpSpeed: 9, gravity: -30,
+            obstacleProbability: 0.35, coinProbability: 0.25,
+            swipeThreshold: 40,
+        };
+
+        // ---------------- SCENE ----------------
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x87ceeb, 20, 120);
+        const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
+        camera.position.set(0, 6, CONFIG.playerZ + 4);
+        camera.lookAt(0, 2, CONFIG.playerZ - 8);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(-5, 10, 5); scene.add(dir);
+
+        // ground
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshStandardMaterial({ color: 0x2e2e2e }));
+        ground.rotation.x = -Math.PI / 2; ground.position.y = -5; scene.add(ground);
+
+        // ---------------- PLAYER ----------------
+        const player = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 1.2), new THREE.MeshStandardMaterial({ color: 0xffb86b }));
+        body.position.y = 1; player.add(body); player.position.set(CONFIG.laneX[1], 0, CONFIG.playerZ);
+        scene.add(player);
+        const playerBox = new THREE.Box3();
+
+        const state = { lane: 1, targetLane: 1, laneSwitchSpeed: 12, velY: 0, onGround: true, alive: true, score: 0, speed: CONFIG.moveSpeedStart };
+
+        // ---------------- TILES & POOL ----------------
+        const tiles = [], obstaclePool = [], coinPool = [], activeObstacles = [], activeCoins = [];
+        function makeTile() { const g = new THREE.BoxGeometry(10, 0.5, CONFIG.tileLength); const m = new THREE.MeshStandardMaterial({ color: 0x7b6f52 }); const mesh = new THREE.Mesh(g, m); mesh.userData = { obstacles: [], coins: [] }; return mesh; }
+        function populateTile(tile) { for (let lane = 0; lane < CONFIG.laneCount; lane++) { const x = CONFIG.laneX[lane]; const localZ = tile.position.z - (Math.random() * (CONFIG.tileLength - 2)) - 2; if (Math.random() < CONFIG.obstacleProbability) { let obs = obstaclePool.pop(); if (!obs) { obs = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2, 1.6), new THREE.MeshStandardMaterial({ color: 0x6b6b6b })); } obs.position.set(x, 1, localZ); obs.visible = true; scene.add(obs); tile.userData.obstacles.push(obs); activeObstacles.push(obs); } else if (Math.random() < CONFIG.coinProbability) { let coin = coinPool.pop(); if (!coin) { coin = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.12, 16), new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.6, roughness: 0.3 })); coin.rotation.x = Math.PI / 2; } coin.position.set(x, 1.0, localZ); coin.visible = true; scene.add(coin); tile.userData.coins.push(coin); activeCoins.push(coin); } } }
+        function initTiles() { for (let i = 0; i < CONFIG.tileCount; i++) { const t = makeTile(); t.position.z = CONFIG.playerZ - (i * CONFIG.tileLength); t.position.y = 0; t.scale.x = 1.2; scene.add(t); tiles.push(t); populateTile(t); } }
+        function recycleTile(tile, frontZ) { tile.userData.obstacles.forEach(o => { o.visible = false; obstaclePool.push(o); }); tile.userData.coins.forEach(c => { c.visible = false; coinPool.push(c); }); tile.userData.obstacles = []; tile.userData.coins = []; tile.position.z = frontZ; populateTile(tile); }
+        initTiles();
+
+        // ---------------- INPUT ----------------
+        const keys = {};
+        window.addEventListener('keydown', e => { if (!state.alive) return; keys[e.code] = true; if (e.code === 'ArrowLeft' || e.code === 'KeyA') { state.targetLane = Math.max(0, state.targetLane - 1); } else if (e.code === 'ArrowRight' || e.code === 'KeyD') { state.targetLane = Math.min(CONFIG.laneCount - 1, state.targetLane + 1); } else if (e.code === 'Space') { if (state.onGround) { state.velY = CONFIG.jumpSpeed; state.onGround = false; } } });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        document.getElementById('restartBtn').addEventListener('click', () => { state.alive = true; state.score = 0; state.speed = CONFIG.moveSpeedStart; state.lane = 1; state.targetLane = 1; state.velY = 0; state.onGround = true; player.position.set(CONFIG.laneX[1], 0, CONFIG.playerZ); document.getElementById('overlay').classList.add('hidden'); activeObstacles.forEach(o => { o.visible = false; obstaclePool.push(o); }); activeCoins.forEach(c => { c.visible = false; coinPool.push(c); }); activeObstacles.length = 0; activeCoins.length = 0; tiles.forEach((t, i) => { t.position.z = CONFIG.playerZ - (i * CONFIG.tileLength); t.userData.obstacles = []; t.userData.coins = []; }); tiles.forEach(t => populateTile(t)); });
+
+        // ---------------- TOUCH ----------------
+        let touchStartX = 0, touchStartY = 0;
+        renderer.domElement.addEventListener('touchstart', e => { if (!state.alive) return; const t = e.touches[0]; touchStartX = t.clientX; touchStartY = t.clientY; }, { passive: true });
+        renderer.domElement.addEventListener('touchend', e => { if (!state.alive) return; const t = e.changedTouches[0]; if (!t) return; const dx = t.clientX - touchStartX; const dy = t.clientY - touchStartY; if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > CONFIG.swipeThreshold) { dx > 0 ? state.targetLane = Math.min(CONFIG.laneCount - 1, state.targetLane + 1) : state.targetLane = Math.max(0, state.targetLane - 1); } else if (Math.abs(dy) > CONFIG.swipeThreshold && dy < 0) { if (state.onGround) { state.velY = CONFIG.jumpSpeed; state.onGround = false; } } else { const w = window.innerWidth; if (t.clientX < w * 0.33) state.targetLane = Math.max(0, state.targetLane - 1); else if (t.clientX > w * 0.66) state.targetLane = Math.min(CONFIG.laneCount - 1, state.targetLane + 1); else if (state.onGround) { state.velY = CONFIG.jumpSpeed; state.onGround = false; } } }, { passive: true });
+
+        // on-screen buttons
+        document.getElementById('btnLeft').addEventListener('pointerdown', () => { state.targetLane = Math.max(0, state.targetLane - 1); });
+        document.getElementById('btnRight').addEventListener('pointerdown', () => { state.targetLane = Math.min(CONFIG.laneCount - 1, state.targetLane + 1); });
+        document.getElementById('btnJump').addEventListener('pointerdown', () => { if (state.onGround) { state.velY = CONFIG.jumpSpeed; state.onGround = false; } });
+
+        // ---------------- ANIMATE ----------------
+        let lastTime = performance.now(), fpsAvg = 60;
+        const scoreUI = document.getElementById('score'), speedUI = document.getElementById('speed'), debugUI = document.getElementById('debug'), overlay = document.getElementById('overlay'), finalScore = document.getElementById('finalScore');
+        function gameOver() { state.alive = false; overlay.classList.remove('hidden'); finalScore.textContent = `Score: ${Math.floor(state.score)}`; }
+        function animate(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.05);
+            lastTime = now;
+            fpsAvg = fpsAvg * 0.92 + 1 / dt * 0.08;
+            if (state.alive) {
+                state.speed = Math.min(CONFIG.maxSpeed, state.speed + CONFIG.speedIncreasePerSecond * dt);
+                tiles.forEach(t => t.position.z += state.speed * dt);
+                activeObstacles.forEach(o => { if (o.visible) o.position.z += state.speed * dt; });
+                activeCoins.forEach(c => { if (c.visible) c.position.z += state.speed * dt; });
+                tiles.forEach(t => { if (t.position.z > camera.position.z + 20) { const minZ = Math.min(...tiles.map(tt => tt.position.z)); recycleTile(t, minZ - CONFIG.tileLength); } });
+                player.position.x += (CONFIG.laneX[state.targetLane] - player.position.x) * Math.min(1, state.laneSwitchSpeed * dt);
+                state.velY += CONFIG.gravity * dt; player.position.y += state.velY * dt; state.onGround = false; if (player.position.y <= 0) { player.position.y = 0; state.velY = 0; state.onGround = true; }
+                playerBox.setFromObject(player);
+                for (let i = activeObstacles.length - 1; i >= 0; i--) { const o = activeObstacles[i]; if (!o.visible) continue; const box = new THREE.Box3().setFromObject(o); if (box.intersectsBox(playerBox)) { gameOver(); break; } if (o.position.z > camera.position.z + 30) { o.visible = false; obstaclePool.push(o); activeObstacles.splice(i, 1); } }
+                for (let i = activeCoins.length - 1; i >= 0; i--) { const c = activeCoins[i]; if (!c.visible) continue; const box = new THREE.Box3().setFromObject(c); if (box.intersectsBox(playerBox)) { c.visible = false; coinPool.push(c); activeCoins.splice(i, 1); state.score += 25; continue; } if (c.position.z > camera.position.z + 30) { c.visible = false; coinPool.push(c); activeCoins.splice(i, 1); } else { c.rotation.z += 6 * dt; } }
+                state.score += state.speed * dt * 0.5;
+                camera.position.x += (player.position.x - camera.position.x) * 5 * dt;
+                camera.position.y += (player.position.y + 4.5 - camera.position.y) * 6 * dt;
+                camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z - 8);
+            }
+            scoreUI.textContent = `Score: ${Math.floor(state.score)}`;
+            speedUI.textContent = `Speed: ${state.speed.toFixed(1)}`;
+            debugUI.textContent = `FPS: ${fpsAvg.toFixed(0)} | Obstacles: ${activeObstacles.length} | Coins: ${activeCoins.length}`;
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        requestAnimationFrame(animate);
+
+        window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+    </script>
 </body>
+
 </html>
